@@ -760,8 +760,8 @@ public class SCFUtil {
         	comment += requestData.getPatron().toString();
         }
         comment += " || request type: " + subTypeDesc;
-        if(requestData.getPatron() != null) {
-            comment += requestData.getPatron().toString();
+        if(requestData.getRequestId() != null){
+            comment += " || Internal identifier: " + requestData.getRequestId();
         }
         if(jsonRequestObject.get("volume") != null && !jsonRequestObject.get("volume").equals("")){
             comment += " || volume: " + jsonRequestObject.get("volume");
