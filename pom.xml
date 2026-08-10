@@ -3,7 +3,7 @@
 	<groupId>com.exlibris</groupId>
 	<artifactId>AlmaRemoteStorageApp</artifactId>
 	<packaging>war</packaging>
-	<version>1.1.1</version>
+	<version>1.1.2</version>
 	<name>Alma Remote Storage App</name>
 
 	<dependencies>
