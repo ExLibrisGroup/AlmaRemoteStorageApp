@@ -19,7 +19,7 @@ public class AlmaRestUtil {
     
     public static final int PER_SECOND_THRESHOLD = 429;
     public static final int ERROR_WINHTTP_SECURE_FAILURE = 600;
-    public static final int THREE_HOURS_COUNTER  = 36;
+    public static final int MAX_RETRIES = 3;
     
     public static HttpResponse sendHttpReq(String url, String method, String body) {
     	int counter = 0;
@@ -33,7 +33,7 @@ public class AlmaRestUtil {
                 }
                 if (code >= HttpsURLConnection.HTTP_INTERNAL_ERROR && code <= HttpsURLConnection.HTTP_VERSION
                         && code != PER_SECOND_THRESHOLD) {
-                	if(counter >= THREE_HOURS_COUNTER) {
+                	if(counter >= MAX_RETRIES) {
                     	logger.error("Response Code " + code + ". Thread not sleeping for 5 minutes anymore.");
                     	return httpResponse;
                     }
@@ -42,6 +42,9 @@ public class AlmaRestUtil {
                     try {
 						TimeUnit.MINUTES.sleep(5);
 					} catch (InterruptedException e) {
+						logger.warn("Retry sleep interrupted. Aborting further retries for URL.");
+						Thread.currentThread().interrupt();
+						return httpResponse;
 					}
                     
                 }
@@ -56,12 +59,13 @@ public class AlmaRestUtil {
 		}
 		String maskedUrl = url.replaceAll("(apikey=)([^&]{0,})([^&]{4})(?=(&|$))", "$1notOnLog....$3");
 		logger.info("Sending " + method + " request to URL : " + maskedUrl);
+        HttpURLConnection con = null;
         try {
             URL obj = new URL(url);
-            HttpURLConnection con = (HttpURLConnection) obj.openConnection();
+            con = (HttpURLConnection) obj.openConnection();
             con.setRequestMethod(method);
             con.setConnectTimeout(20000); //set timeout to 20 seconds
-            con.setReadTimeout(500000);
+            con.setReadTimeout(60000);
             con.setRequestProperty("Accept", "application/json");
             if (body != null) {
                 try {
@@ -71,10 +75,10 @@ public class AlmaRestUtil {
                     con.setRequestProperty("Content-Type", "application/xml");
                 }
                 con.setDoOutput(true);
-                BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(con.getOutputStream(), "UTF-8"));
-                bw.write(body);
-                bw.flush();
-                bw.close();
+                try (BufferedWriter bw = new BufferedWriter(new OutputStreamWriter(con.getOutputStream(), "UTF-8"))) {
+                    bw.write(body);
+                    bw.flush();
+                }
             }
 
             logger.info("Response Code : " + con.getResponseCode());
@@ -93,11 +97,16 @@ public class AlmaRestUtil {
             String inputLine;
             StringBuffer response = new StringBuffer();
 
-            while ((inputLine = in.readLine()) != null) {
-                response.append(inputLine);
-                response.append(System.lineSeparator());
+            if (in != null) {
+                try {
+                    while ((inputLine = in.readLine()) != null) {
+                        response.append(inputLine);
+                        response.append(System.lineSeparator());
+                    }
+                } finally {
+                    in.close();
+                }
             }
-            in.close();
             String out = response.toString().trim();
 
             // Log output of PUT only on error. Always log output of GET.
@@ -116,14 +125,16 @@ public class AlmaRestUtil {
                 }
             }
 
-            con.disconnect();
-
             HttpResponse responseObj = new HttpResponse(out, con.getHeaderFields(), con.getResponseCode());
 
             return responseObj;
         } catch (Exception e) {
 			logger.error("Failed getting HttpResponse : " + e.getMessage(),e);
             return null;
+        } finally {
+            if (con != null) {
+                con.disconnect();
+            }
         }
     }
 

@@ -100,8 +100,18 @@ public class ItemsMain {
             }
             pool.shutdown();
             try {
-                if (!pool.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS)) {
-                    pool.shutdownNow();
+                if (!pool.awaitTermination(30, TimeUnit.MINUTES)) {
+                    logger.error("Merge Items With SCF For Institution: " + institution
+                            + " did not finish within 30 minutes. Forcing shutdown of remaining tasks.");
+                    List<Runnable> notStarted = pool.shutdownNow();
+                    for (Runnable runnable : notStarted) {
+                        if (runnable instanceof Task) {
+                            String fileName = ((Task) runnable).xmlFile.getName();
+                            String message = "File not processed - merge timed out after 30 minutes";
+                            logger.error(message + ". File: " + fileName);
+                            ReportUtil.getInstance().appendReport("ItemsHandler", fileName, institution, message);
+                        }
+                    }
                 }
             } catch (InterruptedException e) {
             }

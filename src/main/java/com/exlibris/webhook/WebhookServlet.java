@@ -3,6 +3,9 @@ package com.exlibris.webhook;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.util.Base64;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -29,6 +32,14 @@ public class WebhookServlet extends HttpServlet {
     private static final long serialVersionUID = 1L;
     final private static Logger logger = Logger.getLogger(WebhookServlet.class);
 
+    // Bounds the number of concurrent webhook-processing threads/connections. When the queue is full,
+    // the calling (Tomcat) thread runs the task itself instead of the message being dropped.
+    private static final int CORE_POOL_SIZE = 10;
+    private static final int QUEUE_CAPACITY = 200;
+    private static final ThreadPoolExecutor webhookExecutor = new ThreadPoolExecutor(CORE_POOL_SIZE, CORE_POOL_SIZE,
+            0L, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<Runnable>(QUEUE_CAPACITY),
+            new ThreadPoolExecutor.CallerRunsPolicy());
+
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
         String challenge = req.getParameter("challenge");
@@ -47,10 +58,11 @@ public class WebhookServlet extends HttpServlet {
         JSONObject props = ConfigurationHandler.getInstance().getConfiguration();
 
         String str;
-        String body = "";
+        StringBuilder bodyBuilder = new StringBuilder();
         while ((str = request.getReader().readLine()) != null) {
-            body += str;
+            bodyBuilder.append(str);
         }
+        String body = bodyBuilder.toString();
         logger.info("message: " + body);
         resp.getWriter().write("Got message");
 
@@ -83,8 +95,7 @@ public class WebhookServlet extends HttpServlet {
             }
         };
 
-        Thread thread = new Thread(runner);
-        thread.start();
+        webhookExecutor.execute(runner);
         logger.info("webhook handler ended");
     }
 

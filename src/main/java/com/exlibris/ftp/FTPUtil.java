@@ -20,7 +20,7 @@ public class FTPUtil extends com.exlibris.ftp.FTPClient {
 
     final static Logger logger = Logger.getLogger(FTPUtil.class);
 
-    static FTPClient ftpClient = new FTPClient();
+    FTPClient ftpClient = new FTPClient();
 
     @Override
     protected void open() throws Exception {
