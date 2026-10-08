@@ -1,7 +1,7 @@
 package com.exlibris.util;
 
-import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import javax.net.ssl.HttpsURLConnection;
 
@@ -27,18 +27,27 @@ public class SCFUtil {
     final private static Logger logger = Logger.getLogger(SCFUtil.class);
     final private static String HOL_XML_TEMPLATE = "<holding><record><datafield ind1=\"0\" ind2=\" \" tag=\"852\"><subfield code=\"b\">_LIB_CODE_</subfield><subfield code=\"c\">_LOC_CODE_</subfield></datafield></record><suppress_from_publishing>false</suppress_from_publishing></holding>";
 
-    private static Set<String> locationList = new HashSet<String>();
+    private static Set<String> locationList = ConcurrentHashMap.newKeySet();
 
-    public static String getSCFHoldingByMmsID(String mmsId, String itemDataLocation) {
+    public static String getSCFHoldingByMmsID(String mmsId, ItemData itemData) {
         logger.debug("get SCF Bib. mmsID : " + mmsId);
+        String itemDataLocation = itemData.getLocation();
         try {
             JSONObject props = ConfigurationHandler.getInstance().getConfiguration();
             String remoteStorageInst = props.getString("remote_storage_inst");
             String remoteStorageHoldingLibrary = props.getString("remote_storage_holding_library");
+            String defaultHoldingLocation = props.getString("remote_storage_holding_location");
             String apiKey = props.getString("remote_storage_apikey");
             String baseUrl = props.getString("gateway");
+            // the location a new holding would get - an existing holding there must be reused, otherwise a
+            // duplicate holding is created for every item
+            String newHoldingLocation = getLocationForNewHolding(remoteStorageHoldingLibrary, defaultHoldingLocation,
+                    itemData);
             JSONArray holdings = getSCFHoldingsByBib(mmsId, baseUrl, apiKey);
             JSONArray institutions = props.getJSONArray("institutions");
+            String fallbackHoldingId = null;
+            String fallbackHoldingLibrary = null;
+            String fallbackHoldingLocation = null;
             if (holdings != null) {
                 for (int j = 0; j < holdings.length(); j++) {
                     JSONObject holding = holdings.getJSONObject(j);
@@ -47,12 +56,18 @@ public class SCFUtil {
                     String location = holding.getJSONObject("location").getString("value");
                     logger.debug("holding (" + j + ") mmsId : " + mmsId + " holding id : " + holdingsID + " library : "
                             + library + " location : " + location);
-                    // if it's the default remote_storage_holding_library
-                    // and the item location is the same as the holding location
-                    if (library.equals(remoteStorageHoldingLibrary) && location.equals(itemDataLocation)) {
+                    // Prefer the holding at the location a new SCF holding would get. If none exists, fall back to
+                    // the item location or any configured remote-storage holding found later in the loop.
+                    if (library.equals(remoteStorageHoldingLibrary) && location.equals(newHoldingLocation)) {
                         logger.debug("found holding for mmsId : " + mmsId + " holding id : " + holdingsID + " library : "
                                 + library);
                         return holdingsID;
+                    }
+                    if (fallbackHoldingId == null && library.equals(remoteStorageHoldingLibrary)
+                            && location.equals(itemDataLocation)) {
+                        fallbackHoldingId = holdingsID;
+                        fallbackHoldingLibrary = library;
+                        fallbackHoldingLocation = location;
                     }
                     // check if one of library locations is in the institution
                     // configuration
@@ -65,9 +80,12 @@ public class SCFUtil {
                                 logger.info("checking institution : " + inst.getString("code") + ", library : " + lib.getString("code"));
                                 JSONArray remoteStorageLocations = lib.optJSONArray("remote_storage_location");
                                 if (library.equals(lib.getString("code")) && remoteStorageLocations != null && remoteStorageLocations.toString().contains(location)) {
-                                    logger.debug("found holding for mmsId : " + mmsId + " holding id : " + holdingsID + " library : "
-                                            + library + " location : " + location);
-                                    return holdingsID;
+                                    if (fallbackHoldingId == null) {
+                                        fallbackHoldingId = holdingsID;
+                                        fallbackHoldingLibrary = library;
+                                        fallbackHoldingLocation = location;
+                                    }
+                                    break;
                                 }
                             }
                             // only one institution can be equal
@@ -75,6 +93,11 @@ public class SCFUtil {
                         }
                     }
                 }
+            }
+            if (fallbackHoldingId != null) {
+                logger.debug("found fallback holding for mmsId : " + mmsId + " holding id : " + fallbackHoldingId
+                        + " library : " + fallbackHoldingLibrary + " location : " + fallbackHoldingLocation);
+                return fallbackHoldingId;
             }
         } catch (Exception e) {
             logger.warn("Failed to resolve SCF holding for mmsId: " + mmsId + ", item location: " + itemDataLocation
@@ -152,8 +175,9 @@ public class SCFUtil {
                 JSONArray libraries = inst.getJSONArray("libraries");
                 for (int j = 0; j < libraries.length(); j++) {
                     if (library.equals(libraries.getJSONObject(j).get("code").toString())) {
-                        if (libraries.getJSONObject(j).getJSONArray("remote_storage_location").toString()
-                                .contains(location)) {
+                        JSONArray remoteStorageLocations = libraries.getJSONObject(j)
+                                .optJSONArray("remote_storage_location");
+                        if (remoteStorageLocations != null && remoteStorageLocations.toString().contains(location)) {
                             return true;
                         }
                     }

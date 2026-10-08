@@ -1,5 +1,9 @@
 package com.exlibris.webhook;
 
+
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
 import javax.net.ssl.HttpsURLConnection;
 
 import org.json.JSONArray;
@@ -26,6 +30,8 @@ public class ManageWebHookMessages {
 
     final private static org.apache.log4j.Logger logger = org.apache.log4j.Logger
             .getLogger(ManageWebHookMessages.class);
+
+    private static final Pattern JOB_ID_IN_LINK = Pattern.compile("/conf/jobs/([^/]+)");
 
     public static void getWebhookMessage(String webhookMessage) {
         if (webhookMessage.isEmpty()) {
@@ -75,7 +81,22 @@ public class ManageWebHookMessages {
             break;
         }
         case JOB_END: {
-            String jobId = webhookMessage.getJSONObject("job_instance").getJSONObject("job_info").getString("id");
+            JSONObject jobInstance = webhookMessage.getJSONObject("job_instance");
+            JSONObject jobInfo = jobInstance.optJSONObject("job_info");
+            String jobId = null;
+            if (jobInfo != null) {
+                jobId = jobInfo.optString("id", null);
+            } else {
+                // some JOB_END messages have no job_info - take the id from the instance link
+                Matcher linkMatcher = JOB_ID_IN_LINK.matcher(jobInstance.optString("link", ""));
+                if (linkMatcher.find()) {
+                    jobId = linkMatcher.group(1);
+                }
+            }
+            if (jobId == null) {
+                logger.debug("JOB_END webhook message has no job id - ignoring");
+                break;
+            }
             String institution = getInstitutionByJobId(jobId, "publishing_job_id");
             if (institution != null) {
             	logger.debug("Merge Items With SCF. Job Id: " + jobId + " Institution: "+institution);
