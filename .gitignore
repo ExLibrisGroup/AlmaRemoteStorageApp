@@ -1,3 +1,6 @@
+.idea
+src/main/resources/conf.json
+target
 # Maven
 target/
 pom.xml.tag
